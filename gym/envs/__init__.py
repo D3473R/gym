@@ -90,6 +90,18 @@ register(
     max_episode_steps=500,
 )
 
+register(
+    id='Sailing-v0',
+    entry_point='gym.envs.classic_control:SailingEnv',
+    timestep_limit=5000,
+)
+
+register(
+    id='SailingDiscrete-v0',
+    entry_point='gym.envs.classic_control:SailingDiscreteEnv',
+    timestep_limit=5000,
+)
+
 # Box2d
 # ----------------------------------------
 
