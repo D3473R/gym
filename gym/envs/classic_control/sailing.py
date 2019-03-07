@@ -11,8 +11,13 @@ import numpy as np
 import time
 
 
+
 def unit_vector(angle):
     return np.array([np.cos(angle), np.sin(angle)])
+
+def rudder_end_coordinates(action, start_coordinate, rudder_lenght):
+    return np.add(np.multiply(unit_vector(action*np.pi/4 + np.pi), rudder_lenght), start_coordinate)
+
 
 
 def angle_between(v1, v2):
@@ -57,6 +62,13 @@ class SailingEnv(gym.Env):
         self.max_x = 200.0
         self.min_y = 0.0
         self.max_y = 150.0
+
+        self.theta = 0
+        self.render_boat = None
+        self.render_sail = None
+        self.render_rudder = None
+
+        self.last_action = 0
 
         self.shoal_min_x = self.min_x + SHOAL
         self.shoal_max_x = self.max_x - SHOAL
@@ -116,14 +128,14 @@ class SailingEnv(gym.Env):
 
         apparent_wind = self.wind - self.boat_v
         apparent_wind_speed = np.linalg.norm(apparent_wind)
-        theta = angle_between(apparent_wind, -unit_heading)
+        self.theta = angle_between(apparent_wind, -unit_heading)
 
         # fdrive is the force driving the boat forward which is dependent on the apparent wind angle.
         # A simple quadratic with zeros at +0.4 (23 degrees apparent) and +4.0 radians is a pretty good approximation
         # (for more info google sailing polar diagrams)
         # the absolute value o ftheta is used because it the driving force doesn't matter whether we are on
         # starboard tack (positive values of theta) or port tack (negative values of theta)
-        fdrive = -(abs(theta) - 0.4) * (abs(theta) - 4.0) * apparent_wind_speed * SAILCOEFF * unit_vector(self.boat_heading)
+        fdrive = -(abs(self.theta) - 0.4) * (abs(self.theta) - 4.0) * apparent_wind_speed * SAILCOEFF * unit_vector(self.boat_heading)
 
         #print("speed:%1.2f heading:%3.1f appwindangle:%3.1f appwindspeed:%1.2f fdrive:%1.2f" % \
         #      (speed * STEPS_PER_SECOND, self.boat_heading * 360 / (2 * np.pi), theta * 360 / (2 * np.pi),
@@ -233,25 +245,49 @@ class SailingEnv(gym.Env):
             target.add_attr(rendering.Transform(translation=(scale * self.target[0], scale * self.target[1])))
             self.viewer.add_geom(target)
 
-            l, r, t, m, b = -boatwidth / 2, boatwidth / 2, -boatlength / 2, 0, boatlength / 2
+            r = boatwidth / 2
+            l = -1 * r
+            b = boatlength / 2
+            t = -1 * b
 
-            boat = rendering.FilledPolygon([(b, 0), (m, l), (t, l), (t, r), (m, r)])
-            boat.add_attr(rendering.Transform(translation=(0, 0)))
+            self.render_boat = rendering.FilledPolygon([(b, 0), (0, l), (t, l), (t, r), (0, r)])
+            self.render_boat.add_attr(rendering.Transform(translation=(0, 0)))
             self.boattrans = rendering.Transform()
-            boat.add_attr(self.boattrans)
-            self.viewer.add_geom(boat)
+            self.render_boat.add_attr(self.boattrans)
+            self.render_sail = rendering.Line(start=(0, 0), end=(0, 20), width=2)
+            self.render_sail.add_attr(rendering.Transform(translation=(0, 0)))
+            self.sailtrans = rendering.Transform()
+            self.render_sail.add_attr(self.sailtrans)
+            self.render_sail.set_color(1,0,0)
+            self.render_rudder = rendering.Line(start=(t,0), end=rudder_end_coordinates(self.last_action, (t,0), 8), width=2)
+            self.render_rudder.add_attr(rendering.Transform(translation=(0, 0)))
+            self.ruddertrans = rendering.Transform()
+            self.render_rudder.add_attr(self.ruddertrans)
+            self.render_rudder.set_color(0,1,0)
+            
 
         self.boattrans.set_translation(self.boat[0] * scale, self.boat[1] * scale)
+        self.sailtrans.set_translation(self.boat[0] * scale, self.boat[1] * scale)
+        self.ruddertrans.set_translation(self.boat[0] * scale, self.boat[1] * scale)
         self.boattrans.set_rotation(self.boat_heading)
+        self.sailtrans.set_rotation(self.theta + np.pi / 2)
+        self.ruddertrans.set_rotation(self.boat_heading)
 
         # should really only update the polyline geom when it has changed
         # even better would to use some vertex buffer magic, but that would
         # require extensive chnages to rendering.py
         track = self.viewer.draw_polyline(self.track)
-        track.set_color(0.8,0.8,0.8)
+        track.set_color(0,0,0)
         track.add_attr(rendering.Transform(scale=(scale,scale)))
 
+        if self.render_sail and self.render_boat and self.render_rudder:
+            self.viewer.add_geom(self.render_boat)
+            self.viewer.add_geom(self.render_sail)
+            self.viewer.add_geom(self.render_rudder)
+    
         self.viewer.draw_label(self.spec.id, 7, screen_height - 25, color=(0, 0, 0, 255), font_size=20,
+                               anchor_y='baseline')
+        self.viewer.draw_label('Action: ' + str(round(self.last_action,2)), 7, screen_height - 50, color=(0, 0, 0, 255), font_size=10,
                                anchor_y='baseline')
         self.viewer.draw_label('episode:0 step:%d score:%.1f hi-score:%.1f' % (
             self.stepnum, self.totalreward, self.besttotalreward), screen_width - 10,
